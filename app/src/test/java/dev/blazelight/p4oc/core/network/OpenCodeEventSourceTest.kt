@@ -44,6 +44,35 @@ class OpenCodeEventSourceTest {
     }
 
     @Test
+    fun `isStale flags a silent Connected socket past the threshold`() {
+        val source = newSource()
+        try {
+            val now = 1_000_000L
+            val staleFrame = now - 61_000L // > SSE_STALE_MS (60s)
+            val freshFrame = now - 30_000L
+
+            // Connected + no frame for > 60s => stale (the zombie-socket case, issue #14).
+            assertEquals(true, source.isStale(now, staleFrame, ConnectionState.Connected))
+            // Connected but a recent frame => not stale.
+            assertEquals(false, source.isStale(now, freshFrame, ConnectionState.Connected))
+            // No frame yet (0L) => never stale, even if "Connected".
+            assertEquals(false, source.isStale(now, 0L, ConnectionState.Connected))
+            // Not Connected => watchdog leaves reconnect to the normal error/escalation path.
+            assertEquals(false, source.isStale(now, staleFrame, ConnectionState.Disconnected))
+            assertEquals(false, source.isStale(now, staleFrame, ConnectionState.Connecting))
+        } finally {
+            source.shutdown()
+        }
+    }
+
+    private fun newSource(): OpenCodeEventSource = OpenCodeEventSource(
+        okHttpClient = OkHttpClient(),
+        json = json,
+        baseUrl = "http://127.0.0.1:1",
+        eventMapper = EventMapper(json, MessageMapper(json)),
+    )
+
+    @Test
     fun `slow collector receives more than previous delta buffer capacity without loss`() = runTest {
         val source = OpenCodeEventSource(
             okHttpClient = OkHttpClient(),

@@ -191,6 +191,10 @@ class SessionRepositoryImpl(
     override fun acceptEvent(event: OpenCodeEvent) {
         if (event is OpenCodeEvent.Connected) {
             hydrateAfterReconnect()
+            // Message refresh must run on EVERY reconnect, independent of the snapshot-hydrate
+            // inFlight guard above (which only fires once). Messages are a separate concern from
+            // the session-list snapshot, so refetch them directly here (issue #14).
+            scope.launch { refreshOpenSessionMessages() }
             scope.launch { reconcileObservedPendingPermissions() }
             return
         }
@@ -342,6 +346,21 @@ class SessionRepositoryImpl(
             } catch (e: Exception) {
                 AppLog.w(TAG, "Error during post-reconnect question reconciliation: ${e.message}")
             }
+        }
+    }
+
+    /**
+     * Re-fetch messages for every actively-observed session after an SSE reconnect.
+     * Called directly from the [OpenCodeEvent.Connected] path (NOT gated by the snapshot-hydrate
+     * inFlight guard, which only permits one hydration) so an open conversation self-heals on every
+     * reconnect (issue #14: had to leave and re-enter to see updates).
+     * Reuses the same REST refetch/merge path [loadMessages] that ChatViewModel uses on entry.
+     */
+    private suspend fun refreshOpenSessionMessages() {
+        val openSessions = synchronized(messageStates) { messageStates.keys.toList() }
+        for (id in openSessions) {
+            runCatching { loadMessages(SessionId(id), limit = null) }
+                .onFailure { AppLog.w(TAG, "Post-reconnect message refresh failed for $id: ${it.message}") }
         }
     }
 

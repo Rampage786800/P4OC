@@ -1,12 +1,16 @@
 package dev.blazelight.p4oc.data.session
 
+import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ConnectionManager
+import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
+import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.server.ServerGeneration
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.workspace.Workspace
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +45,46 @@ class SessionRepositoryProvider(
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val entries = mutableMapOf<Key, Entry>()
 
+    private companion object {
+        const val TAG = "SessionRepositoryProvider"
+    }
+
+    init {
+        // Deliver SSE reconnects to every live workspace repository so open conversations
+        // self-heal without navigation (issue #14). The synthetic OpenCodeEvent.Connected never
+        // reaches the per-workspace fan-out (it carries no directory), so we broadcast it here on
+        // each non-Connected → Connected transition of the shared connection.
+        scope.launch {
+            var wasConnected = false
+            connectionManager.connectionState.collect { state ->
+                val nowConnected = state is ConnectionState.Connected
+                if (nowConnected && !wasConnected) {
+                    broadcastReconnect()
+                }
+                wasConnected = nowConnected
+            }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // resilience guard: one bad repo must not stop the broadcast
+    private fun broadcastReconnect() {
+        // Generation is a single global counter in ConnectionManager, so one generation == one
+        // connection == one server: filtering by generation alone correctly targets exactly the
+        // repositories on the reconnected connection, without depending on server-URL normalization.
+        val generation = connectionManager.currentGeneration ?: return
+        val repositories = synchronized(this) {
+            entries.filterKeys { it.generation == generation.value }
+                .map { it.value.repository }
+        }
+        repositories.forEach { repository ->
+            try {
+                repository.acceptEvent(OpenCodeEvent.Connected)
+            } catch (e: Exception) {
+                AppLog.e(TAG, "Reconnect broadcast failed for a workspace: ${e.message}", e)
+            }
+        }
+    }
+
     fun acquire(workspace: Workspace, generation: ServerGeneration): Lease = synchronized(this) {
         val key = workspace.toProviderKey(generation)
         val entry = entries.getOrPut(key) {
@@ -70,6 +114,7 @@ class SessionRepositoryProvider(
         repositoryToClose.repository.close()
     }
 
+    @Suppress("TooGenericExceptionCaught") // resilience guard: one bad event must not kill the collector
     private fun collectWorkspaceEvents(
         workspace: Workspace,
         generation: ServerGeneration,
@@ -80,7 +125,19 @@ class SessionRepositoryProvider(
                 scopedEvent.generation == generation &&
                 scopedEvent.workspaceKey == workspace.key
             ) {
-                repository.acceptEvent(scopedEvent.event)
+                try {
+                    repository.acceptEvent(scopedEvent.event)
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
+                    // A single malformed/unexpected event must never permanently kill this
+                    // workspace's live event delivery (issue #14: chat froze until re-entry).
+                    AppLog.e(
+                        TAG,
+                        "Dropping event ${scopedEvent.event::class.simpleName} for ${workspace.key}: ${e.message}",
+                        e,
+                    )
+                }
             }
         }
     }

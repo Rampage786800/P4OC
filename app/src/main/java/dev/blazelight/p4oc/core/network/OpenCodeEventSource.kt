@@ -17,12 +17,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -44,6 +46,12 @@ class OpenCodeEventSource(
     companion object {
         private const val TAG = "OpenCodeEventSource"
         private const val MAX_CONSECUTIVE_ERRORS = 15
+
+        // Liveness watchdog: the server emits frequent heartbeat comments, so a Connected socket
+        // that receives no frame (message OR heartbeat) for this long is presumed dead (silent
+        // zombie socket — readTimeout is 0). Conservative vs. the heartbeat cadence. (Issue #14.)
+        private const val SSE_STALE_MS = 60_000L
+        private const val WATCHDOG_INTERVAL_MS = 20_000L
     }
 
     private val eventPumpScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -73,6 +81,15 @@ class OpenCodeEventSource(
 
     private val consecutiveErrors = AtomicInteger(0)
 
+    // Timestamp of the last received SSE frame (message or heartbeat comment). 0 = none yet.
+    // Read by the watchdog off the event thread, so @Volatile.
+    @Volatile
+    private var lastFrameAtMs: Long = 0L
+
+    private fun markFrameReceived() {
+        lastFrameAtMs = System.currentTimeMillis()
+    }
+
     init {
         eventPumpScope.launch {
             for (queued in eventChannel) {
@@ -83,7 +100,36 @@ class OpenCodeEventSource(
                 }
             }
         }
+        startLivenessWatchdog()
     }
+
+    /**
+     * Force a reconnect when the socket claims Connected but has gone silent past [SSE_STALE_MS].
+     * With readTimeout(0) the library never surfaces a silently-dead socket, so nothing else would
+     * detect it — the app would show "connected" while receiving zero events (issue #14).
+     */
+    private fun startLivenessWatchdog() {
+        eventPumpScope.launch {
+            while (isActive) {
+                delay(WATCHDOG_INTERVAL_MS)
+                if (isStale(System.currentTimeMillis(), lastFrameAtMs, _connectionState.value)) {
+                    val idle = System.currentTimeMillis() - lastFrameAtMs
+                    AppLog.w(TAG, "SSE idle ${idle}ms > ${SSE_STALE_MS}ms while Connected – forcing reconnect")
+                    reconnect()
+                }
+            }
+        }
+    }
+
+    /**
+     * True when the socket claims [ConnectionState.Connected] but has received no frame
+     * (message or heartbeat) within [SSE_STALE_MS]. `lastFrameAtMs == 0L` means no frame yet
+     * (connect in progress) — never stale. Extracted for deterministic unit testing.
+     */
+    internal fun isStale(nowMs: Long, lastFrameAtMs: Long, state: ConnectionState): Boolean =
+        lastFrameAtMs != 0L &&
+            state is ConnectionState.Connected &&
+            (nowMs - lastFrameAtMs) > SSE_STALE_MS
 
     fun connect() {
         val besRef: BackgroundEventSource
@@ -100,6 +146,7 @@ class OpenCodeEventSource(
             AppLog.d(TAG, "connect() – creating BackgroundEventSource")
             _connectionState.value = ConnectionState.Connecting
             consecutiveErrors.set(0)
+            markFrameReceived()
 
             val gen = ++generation
             besRef = createBackgroundEventSource(gen)
@@ -132,6 +179,7 @@ class OpenCodeEventSource(
             toClose = detachLocked()
             _connectionState.value = ConnectionState.Connecting
             consecutiveErrors.set(0)
+            markFrameReceived()
 
             val gen = ++generation
             besRef = createBackgroundEventSource(gen)
@@ -155,6 +203,9 @@ class OpenCodeEventSource(
             _connectionState.value = ConnectionState.Disconnected
         }
         toClose?.closeSafely()
+        // Stop the event pump + liveness watchdog so they don't outlive this instance.
+        eventPumpScope.cancel("OpenCodeEventSource shut down")
+        eventChannel.close()
     }
 
     /**
@@ -279,19 +330,23 @@ class OpenCodeEventSource(
             AppLog.d(TAG, "SSE connected (onOpen)")
             errorFiredSinceOpen = false
             consecutiveErrors.set(0)
+            markFrameReceived()
             _connectionState.value = ConnectionState.Connected
             enqueueEvent(OpenCodeEvent.Connected, gen)
         }
 
         override fun onMessage(event: String, messageEvent: MessageEvent) {
             if (!isActiveGeneration(gen)) return
+            markFrameReceived()
             val data = messageEvent.data
             AppLog.v(TAG, "SSE message received: event=$event, length=${data.length}")
             parseAndEmitEvent(data, gen)
         }
 
         override fun onComment(comment: String) {
-            // Keepalive — nothing to do
+            // Keepalive heartbeat — no event to emit, but it proves the socket is alive.
+            if (!isActiveGeneration(gen)) return
+            markFrameReceived()
         }
 
         override fun onClosed() {

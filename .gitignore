@@ -44,6 +44,10 @@ captures/
 .externalNativeBuild/
 .cxx/
 
+# Local dev convenience script (machine-specific paths)
+Makefile
+CLAUDE.md
+
 # Temp files
 temp_opencode_analysis/
 # Images (except screenshots/ and app resources)

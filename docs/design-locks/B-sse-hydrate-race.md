@@ -31,6 +31,7 @@
 9. Cancellation during hydrate (workspace scope dies) → coroutine cancels, buffer GC'd with scope, no state commit.
 10. Retry: user-triggered or auto on next reconnect. `hydrate(force=true)` rebuilds snapshot, then merges with current `Stale.snapshot` taking REST as source of truth for snapshot fields, but preserving any post-hydrate live events received during the new hydrate window (recursive — same buffering rules, capped at 3 retries).
 11. App background during hydrate: `WorkspaceViewModel` survives backgrounding; hydrate continues. If SSE drops, on resume `OpenCodeEventSource` reconnects and `Stale` may trigger re-hydrate.
+12. **Reconnect self-heal covers per-session message state, not just the session/project snapshot.** The synthetic `OpenCodeEvent.Connected` carries no directory, so it never reaches the per-workspace event fan-out (`ScopedEvent` would tag it `WorkspaceKey.Global`). Instead, `SessionRepositoryProvider` observes `ConnectionManager.connectionState` and, on every non-`Connected → Connected` transition, delivers `OpenCodeEvent.Connected` to every live repository for the current server generation. `hydrateAfterReconnect()` then re-fetches messages for every actively-observed session (those present in `messageStates`) via the same REST path as initial screen entry (`loadMessages`), so an open conversation catches up on anything missed during the outage without the user leaving and re-entering. A liveness watchdog in `OpenCodeEventSource` (no frame — message or heartbeat — for > 60 s while `Connected`) forces the reconnect that drives this path when a socket dies silently. (Issue #14.)
 
 ## Rejected alternatives
 
@@ -49,6 +50,8 @@
 | App backgrounds during hydrate | Hydrate continues. SSE may drop; reconnect on resume; `Stale` triggers re-hydrate. |
 | Buffer overflow (>512 events during slow hydrate) | Drop oldest, warn log, `overflowed=true`. On `Live` transition, schedule `hydrate(force=true)`. |
 | `Disconnected` during `Hydrating` | `connectionState=Disconnected` immediately, buffer untouched. On subsequent `Connected`, hydrate retries. |
+| SSE reconnects while a conversation is open | Provider broadcasts `Connected` to the workspace repo; `hydrateAfterReconnect()` rebuilds the snapshot **and** re-fetches messages for every open session. Open chat catches up with no navigation (issue #14). |
+| Socket dies silently (no `onError`/`onClosed`, `readTimeout=0`) | Liveness watchdog sees no frame for > 60 s while `Connected` and forces `reconnect()`, which then drives the reconnect self-heal above. |
 
 ## Files affected
 
