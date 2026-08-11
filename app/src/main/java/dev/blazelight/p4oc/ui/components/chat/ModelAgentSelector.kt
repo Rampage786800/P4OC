@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -21,6 +22,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.window.Dialog
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.data.remote.dto.AgentDto
@@ -104,7 +106,7 @@ fun ModelAgentSelectorBar(
             modifier = Modifier
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.md, vertical = Spacing.xs),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (availableAgents.isNotEmpty()) {
@@ -119,31 +121,26 @@ fun ModelAgentSelectorBar(
                 Box {
                     Surface(
                         onClick = { showAgentPicker = true },
-                        shape = RectangleShape,
-                        color = agentColor.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(50),
+                        color = agentColor,
                         border = androidx.compose.foundation.BorderStroke(
                             Sizing.strokeMd,
-                            agentColor.copy(alpha = 0.4f)
+                            agentColor
                         ),
                         modifier = Modifier
-                            .height(Sizing.buttonHeightMd)
+                            .height(Sizing.chipHeight)
                             .semantics { contentDescription = agentSelectorDescription }
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = Spacing.lg),
+                            modifier = Modifier.padding(horizontal = Spacing.md),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
                             Text(
-                                text = "@$currentAgentName",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                color = agentColor
-                            )
-                            Text(
-                                text = "▾",
-                                color = agentColor,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                text = "⌘ $currentAgentName",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = theme.background
                             )
                         }
                     }
@@ -196,20 +193,22 @@ fun ModelAgentSelectorBar(
             if (availableModels.isNotEmpty()) {
                 Surface(
                     onClick = { showModelPicker = true },
-                    shape = androidx.compose.ui.graphics.RectangleShape,
+                    shape = RoundedCornerShape(50),
                     color = theme.background,
                     border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.border),
-                    modifier = Modifier.height(Sizing.buttonHeightMd)
+                    modifier = Modifier
+                        .height(Sizing.chipHeight)
+                        .widthIn(max = Sizing.chipMaxWidth)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = Spacing.lg),
+                        modifier = Modifier.padding(horizontal = Spacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         Text(
                             text = selectedModelName,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
                             color = theme.text,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -524,21 +523,21 @@ private fun ReasoningEffortSelect(
     Box {
         Surface(
             onClick = { expanded = true },
-            shape = RectangleShape,
+            shape = RoundedCornerShape(50),
             color = theme.background,
             border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.border),
             modifier = Modifier
-                .height(Sizing.buttonHeightMd)
+                .height(Sizing.chipHeight)
                 .testTag("reasoning_effort_select")
         ) {
             Box(
-                modifier = Modifier.padding(horizontal = Spacing.lg),
+                modifier = Modifier.padding(horizontal = Spacing.md),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = currentLabel,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    text = "think: $currentLabel",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
                     color = if (selectedEffort == null) theme.textMuted else theme.text,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -165,6 +166,9 @@ fun ChatInputBar(
 
     Box(modifier = modifier.fillMaxWidth()) {
         Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(Sizing.strokeThin, theme.border, RectangleShape),
             color = theme.backgroundElement,
             shape = RectangleShape
         ) {
@@ -253,7 +257,7 @@ fun ChatInputBar(
                         ) {
                             Text(
                                 text = "+",
-                                color = theme.accent,
+                                color = theme.textMuted,
                                 fontFamily = FontFamily.Monospace,
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -267,20 +271,20 @@ fun ChatInputBar(
                             .border(
                                 width = Sizing.strokeMd,
                                 color = theme.border,
-                                shape = RectangleShape
+                                shape = RoundedCornerShape(50)
                             )
                             .background(
                                 theme.background,
-                                RectangleShape
+                                RoundedCornerShape(50)
                             )
-                            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         if (currentText.isEmpty()) {
                             Text(
                                 "> Message...",
                                 style = MaterialTheme.typography.bodyMedium,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = FontFamily.Default,
                                 color = theme.textMuted
                             )
                         }
@@ -357,7 +361,7 @@ fun ChatInputBar(
                         ) {
                             Text(
                                 text = "■",
-                                color = theme.error,
+                                color = theme.text,
                                 fontFamily = FontFamily.Monospace,
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -374,6 +378,10 @@ fun ChatInputBar(
                         enabled = canSubmit,
                         modifier = Modifier
                             .size(Sizing.iconButtonMd)
+                            .background(
+                                color = if (canSubmit) theme.accent else theme.background,
+                                shape = RoundedCornerShape(50)
+                            )
                             .semantics { contentDescription = sendContentDescription }
                             .testTag("send_button")
                     ) {
@@ -382,7 +390,7 @@ fun ChatInputBar(
                         } else {
                             Text(
                                 text = "↑",
-                                color = if (canSubmit) theme.accent else theme.textMuted,
+                                color = if (canSubmit) theme.background else theme.textMuted,
                                 fontFamily = FontFamily.Monospace,
                                 style = MaterialTheme.typography.titleMedium
                             )
